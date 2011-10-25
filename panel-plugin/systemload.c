@@ -97,9 +97,11 @@ typedef struct
 
     gulong     value_read;
     gboolean enabled;
+    gboolean singleline;
 
     /*options*/
     GtkWidget *opt_enabled;
+    GtkWidget *opt_singleline;
 } t_uptime_monitor;
 
 typedef struct
@@ -185,7 +187,7 @@ update_monitors(t_global_monitor *global)
         days = global->uptime->value_read / 86400;
         hours = (global->uptime->value_read / 3600) % 24;
         mins = (global->uptime->value_read / 60) % 60;
-        g_snprintf(caption, sizeof(caption), ngettext("%d day", "%d days", days), days);
+        g_snprintf(caption, sizeof(caption), ngettext("%d day ", "%d days ", days), days);
         gtk_label_set_text(GTK_LABEL(global->uptime->label_up),
                            caption);
         g_snprintf(caption, sizeof(caption), "%d:%02d", hours, mins);
@@ -222,6 +224,32 @@ static gboolean tooltip_cb3(GtkWidget *widget, gint x, gint y, gboolean keyboard
 {
 	gtk_tooltip_set_custom(tooltip, global->uptime->tooltip_text);
 	return TRUE;
+}
+
+static void
+setup_uptime_box(t_global_monitor *global)
+{
+    if(global->uptime->singleline) 
+        global->uptime->box = GTK_WIDGET(gtk_hbox_new(FALSE, 0));
+    else
+        global->uptime->box = GTK_WIDGET(gtk_vbox_new(FALSE, 0));
+
+        
+    gtk_widget_show(GTK_WIDGET(global->uptime->box));
+
+    gtk_container_add(GTK_CONTAINER(global->uptime->ebox),
+                      GTK_WIDGET(global->uptime->box));
+
+    global->uptime->label_up = gtk_label_new("");
+    gtk_widget_show(global->uptime->label_up);
+    gtk_box_pack_start(GTK_BOX(global->uptime->box),
+                       GTK_WIDGET(global->uptime->label_up),
+                       FALSE, FALSE, 0);
+    global->uptime->label_down = gtk_label_new("");
+    gtk_widget_show(global->uptime->label_down);
+    gtk_box_pack_start(GTK_BOX(global->uptime->box),
+                       GTK_WIDGET(global->uptime->label_down),
+                       FALSE, FALSE, 0);
 }
 
 static void
@@ -310,23 +338,8 @@ monitor_set_orientation (XfcePanelPlugin *plugin, GtkOrientation orientation,
     g_signal_connect(global->monitor[1]->ebox, "query-tooltip", G_CALLBACK(tooltip_cb1), global);
     g_signal_connect(global->monitor[2]->ebox, "query-tooltip", G_CALLBACK(tooltip_cb2), global);
     g_signal_connect(global->uptime->ebox, "query-tooltip", G_CALLBACK(tooltip_cb3), global);
-
-    global->uptime->box = GTK_WIDGET(gtk_vbox_new(FALSE, 0));
-    gtk_widget_show(GTK_WIDGET(global->uptime->box));
-
-    gtk_container_add(GTK_CONTAINER(global->uptime->ebox),
-                      GTK_WIDGET(global->uptime->box));
-
-    global->uptime->label_up = gtk_label_new("");
-    gtk_widget_show(global->uptime->label_up);
-    gtk_box_pack_start(GTK_BOX(global->uptime->box),
-                       GTK_WIDGET(global->uptime->label_up),
-                       FALSE, FALSE, 0);
-    global->uptime->label_down = gtk_label_new("");
-    gtk_widget_show(global->uptime->label_down);
-    gtk_box_pack_start(GTK_BOX(global->uptime->box),
-                       GTK_WIDGET(global->uptime->label_down),
-                       FALSE, FALSE, 0);
+   
+    setup_uptime_box(global);
 
     gtk_box_pack_start(GTK_BOX(global->box),
                        GTK_WIDGET(global->uptime->ebox),
@@ -338,6 +351,7 @@ monitor_set_orientation (XfcePanelPlugin *plugin, GtkOrientation orientation,
     update_monitors (global);
 }
 
+ 
 static t_global_monitor *
 monitor_control_new(XfcePanelPlugin *plugin)
 {
@@ -500,6 +514,8 @@ monitor_read_config(XfcePanelPlugin *plugin, t_global_monitor *global)
             
             global->uptime->enabled = 
                 xfce_rc_read_bool_entry (rc, "Enabled", TRUE);
+            global->uptime->singleline = 
+                xfce_rc_read_bool_entry (rc, "SingleLine", FALSE);
         }
     }
 
@@ -549,6 +565,8 @@ monitor_write_config(XfcePanelPlugin *plugin, t_global_monitor *global)
 
     xfce_rc_write_bool_entry (rc, "Enabled",
             global->uptime->enabled);
+    xfce_rc_write_bool_entry (rc, "SingleLine",
+            global->uptime->singleline);
 
     xfce_rc_close (rc);
 }
@@ -663,6 +681,20 @@ uptime_toggled_cb(GtkWidget *check_button, t_global_monitor *global)
                                  global->uptime->enabled);
     setup_monitor(global);
 }
+
+static void
+uptime_singleline_cb(GtkWidget *check_button, t_global_monitor *global)
+{
+    global->uptime->singleline = !global->uptime->singleline;
+    
+    gtk_container_remove(GTK_CONTAINER(global->uptime->ebox), GTK_WIDGET(global->uptime->box));
+
+    setup_uptime_box(global);
+
+    update_monitors (global);
+}
+
+
 
 static void
 label_toggled(t_global_monitor *global, gint count)
@@ -906,15 +938,25 @@ monitor_create_options(XfcePanelPlugin *plugin, t_global_monitor *global)
     gtk_box_pack_start(GTK_BOX(vbox),
                        GTK_WIDGET(global->uptime->opt_enabled),
                        FALSE, FALSE, 0);
-
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(global->uptime->opt_enabled),
                                  global->uptime->enabled);
+
+    global->uptime->opt_singleline =
+        gtk_check_button_new_with_mnemonic(_("Show in a single line"));
+    gtk_widget_show(global->uptime->opt_singleline);
+    gtk_box_pack_start(GTK_BOX(vbox),
+                       GTK_WIDGET(global->uptime->opt_singleline),
+                       FALSE, FALSE, 0);
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(global->uptime->opt_singleline),
+                                 global->uptime->singleline);
 
     label = gtk_label_new (_(FRAME_TEXT[3]));
     gtk_notebook_set_tab_label (GTK_NOTEBOOK (notebook), gtk_notebook_get_nth_page (GTK_NOTEBOOK (notebook), 3), label);
 
     g_signal_connect(GTK_WIDGET(global->uptime->opt_enabled), "toggled",
                      G_CALLBACK(uptime_toggled_cb), global);
+    g_signal_connect(GTK_WIDGET(global->uptime->opt_singleline), "toggled",
+                     G_CALLBACK(uptime_singleline_cb), global);
     /*uptime monitor options - end*/
 
     g_signal_connect(GTK_WIDGET(global->monitor[0]->opt_da), "expose_event",
