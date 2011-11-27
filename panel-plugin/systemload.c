@@ -106,12 +106,22 @@ typedef struct
 
 typedef struct
 {
+    GtkWidget *update_spinbutton;
+    GtkWidget *update_label;
+} t_general_options;
+
+typedef struct
+{
     XfcePanelPlugin   *plugin;
     GtkWidget         *ebox;
     GtkWidget         *box;
     guint             timeout_id;
     t_monitor         *monitor[3];
     t_uptime_monitor  *uptime;
+    t_general_options *gen_options;
+
+    /* global options */
+    guint  update_freq;
 
     /* options dialog */
     GtkWidget  *opt_dialog;
@@ -252,6 +262,16 @@ setup_uptime_box(t_global_monitor *global)
                        FALSE, FALSE, 0);
 }
 
+static gint
+monitor_set_update_frequency(t_global_monitor *global, gint uf)
+{
+    if (global->timeout_id)
+        g_source_remove(global->timeout_id);
+    
+    global->update_freq = uf;
+    return g_timeout_add(uf, (GSourceFunc)update_monitors, global);
+}
+
 static void
 monitor_set_orientation (XfcePanelPlugin *plugin, GtkOrientation orientation,
                          t_global_monitor *global)
@@ -361,6 +381,7 @@ monitor_control_new(XfcePanelPlugin *plugin)
     global = g_new(t_global_monitor, 1);
     global->plugin = plugin;
     global->timeout_id = 0;
+    global->update_freq = UPDATE_TIMEOUT;
     global->ebox = gtk_event_box_new();
     gtk_container_set_border_width (GTK_CONTAINER (global->ebox), BORDER/2);
     gtk_widget_show(global->ebox);
@@ -392,6 +413,8 @@ monitor_control_new(XfcePanelPlugin *plugin)
     global->uptime->enabled = TRUE;
     global->uptime->tooltip_text = gtk_label_new(NULL);
     g_object_ref(global->uptime->tooltip_text);
+    
+    global->gen_options = g_new(t_general_options, 1);
     
     return global;
 }
@@ -482,7 +505,9 @@ monitor_read_config(XfcePanelPlugin *plugin, t_global_monitor *global)
 
     if (!rc)
         return;
-    
+   
+    global->update_freq = xfce_rc_read_int_entry (rc, "Update_Frequency", UPDATE_TIMEOUT);
+
     for(count = 0; count < 3; count++)
     {
         if (xfce_rc_has_group (rc, MONITOR_ROOT[count]))
@@ -538,6 +563,8 @@ monitor_write_config(XfcePanelPlugin *plugin, t_global_monitor *global)
 
     if (!rc)
         return;
+
+    xfce_rc_write_int_entry (rc, "Update_Frequency", global->update_freq);
 
     for(count = 0; count < 3; count++)
     {
@@ -600,6 +627,10 @@ static void
 monitor_apply_options(t_global_monitor *global)
 {
     gint count;
+
+    gint update_freq = gtk_spin_button_get_value(global->gen_options->update_spinbutton) * 1000; //convert into milliseconds
+    if ( global->update_freq != update_freq )
+        global->timeout_id = monitor_set_update_frequency(global, update_freq);
 
     for(count = 0; count < 3; count++)
     {
@@ -820,7 +851,8 @@ monitor_create_options(XfcePanelPlugin *plugin, t_global_monitor *global)
 	    N_ ("CPU monitor"),
 	    N_ ("Memory monitor"),
 	    N_ ("Swap monitor"),
-	    N_ ("Uptime monitor")
+	    N_ ("Uptime monitor"),
+	    N_ ("General")
     };
 
     xfce_panel_plugin_block_menu (plugin);
@@ -958,7 +990,34 @@ monitor_create_options(XfcePanelPlugin *plugin, t_global_monitor *global)
     g_signal_connect(GTK_WIDGET(global->uptime->opt_singleline), "toggled",
                      G_CALLBACK(uptime_singleline_cb), global);
     /*uptime monitor options - end*/
+    
+    /*general options start*/
+    vbox = gtk_vbox_new(FALSE, BORDER);
+    gtk_container_add( GTK_CONTAINER (notebook), vbox);
+    gtk_container_set_border_width( GTK_CONTAINER (vbox), BORDER);
 
+    hbox = gtk_hbox_new(FALSE, BORDER);
+    global->gen_options->update_label = gtk_label_new(_("Update frequency (seconds)"));
+    gtk_widget_show( global->gen_options->update_label );
+    gtk_box_pack_start(GTK_BOX(hbox),
+                       GTK_WIDGET(global->gen_options->update_label) ,
+                       FALSE, FALSE, 0);
+
+    global->gen_options->update_spinbutton = gtk_spin_button_new_with_range(0.25 ,
+                                                                            60 , 0.25);
+    gtk_spin_button_set_digits(global->gen_options->update_spinbutton, 2);
+    gtk_spin_button_set_value(global->gen_options->update_spinbutton, global->update_freq / 1000);
+    gtk_widget_show(global->gen_options->update_spinbutton);
+    gtk_box_pack_start(GTK_BOX(hbox),
+                       global->gen_options->update_spinbutton,
+                       FALSE, FALSE, 0);
+    
+    gtk_box_pack_start(GTK_BOX(vbox), GTK_BOX(hbox), FALSE, FALSE, 0);
+    label = gtk_label_new (_(FRAME_TEXT[4]));
+    gtk_notebook_set_tab_label (GTK_NOTEBOOK (notebook), gtk_notebook_get_nth_page (GTK_NOTEBOOK (notebook), 4), label);
+
+    /*general options end*/
+    
     g_signal_connect(GTK_WIDGET(global->monitor[0]->opt_da), "expose_event",
                      G_CALLBACK(expose_event_cb), NULL);
     g_signal_connect(GTK_WIDGET(global->monitor[0]->opt_button), "clicked",
@@ -1016,8 +1075,7 @@ systemload_construct (XfcePanelPlugin *plugin)
 
     update_monitors (global);
 
-    global->timeout_id = 
-        g_timeout_add(UPDATE_TIMEOUT, (GSourceFunc)update_monitors, global);
+    global->timeout_id = monitor_set_update_frequency(global, global->update_freq);
     
     g_signal_connect (plugin, "free-data", G_CALLBACK (monitor_free), global);
 
